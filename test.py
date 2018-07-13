@@ -9,6 +9,8 @@ import operator
 
 #For timing purposes
 counter = 0
+testy_1 = np.random.randn(20)
+testy_2 = np.random.randn(20)
 
 #Inputs
 
@@ -107,16 +109,20 @@ def nd_exp(base,alpha):
 #     output = np.exp(-1*(nd_abs(t)**2))*np.prod(element_hermite_polynomials)
 #     print(time.time()-last)
 #     return output
-def evaluate_nd_hermite_function(H_beta_is,t,coeff):
-    global counter
+def evaluate_nd_hermite_function(H_beta_is,powers,coeff):
+    # global testy_1,testy_2
     # last = time.time()
-    element_hermite_polynomials = [H_beta_is[i](t[i]) for i in range(len(t)) ]
-    # print('eval time',time.time()-last);last = time.time()
-    # output = coeff*np.prod(element_hermite_polynomials)
-    output = coeff*reduce(operator.mul,element_hermite_polynomials,1)
-    # output = coeff*element_hermite_polynomials[0]*element_hermite_polynomials[1]
-    # print('sum time',time.time()-last)
-    # counter+=1
+    # element_hermite_polynomials = [H_beta_is[i](t[i]) for i in range(len(t)) ]
+    # element_hermite_polynomials = [np.dot(testy_1,testy_2) for i in range(2)]
+    prod = 1
+    for i in range(len(powers)):
+        last = time.time()
+        powers_cut = powers[i,0:len(H_beta_is[i])]
+        prod *= np.dot(powers_cut,H_beta_is[i])
+        print(time.time()-last)
+    output = coeff*prod
+    # output = coeff*2.5*9.5
+    # print(last-time.time())
     return output
 # print box_distance_check([2,4,9,5],[1,3,4,5],1)# print assign_box([4.7,9.1,29.1],[0,27,0,27,0,27],3)
 
@@ -132,7 +138,6 @@ class TaylorExpansion(object):
         self.delta_j_set=delta_j_set
         self.s_set=s_set
         self.indexer = [x for x in nd_itertool(self.d,self.p)]
-        last = time.time()
         self.C_betas = np.zeros(tuple([p for i in range(d)]))
         #This piece is for obtaining hermite function from hermite polynomial
         #precomputed for efficiency
@@ -140,30 +145,36 @@ class TaylorExpansion(object):
         self.hermite_coeffs = [np.exp(-1*(nd_abs(
         (s_j-self.t_0)/(math.sqrt(delta_j)))**2))
          for delta_j,s_j in list(zip(self.delta_j_set,self.s_set))]
+        #these are the N x values that are entered into the hermite series
+        self.xs = [((s_j-self.t_0)/(math.sqrt(delta_j
+        ))) for delta_j,s_j in list(zip(self.delta_j_set,self.s_set))]
+        #These are all the powers of the above x values (dim (x value) x exponent value)
+        self.powers = np.array([[np.power(el,range(self.p+1)) for el in x] for x in self.xs])
+        last = time.time()
         for beta in self.indexer:
             indices = tuple([el-1 for el in beta])
             self.C_betas[indices]=self.compute_C_beta(beta)
         print('time computing C_betas: '+str(time.time()-last))
     def compute_C_beta(self,beta):
         #First, create hermite objects for the 1D components H_beta_1(), H_beta_2(), etc
-        H_beta_is = [hermite(beta_i) for beta_i in beta]
+        H_beta_is = [hermite(beta_i).c for beta_i in beta]
         #Then, make a list of the summands:
         #the evaluted h_beta for each source (indexed by j),
         #times the delta fraction coefficient
         summands = [(self.delta/delta_j)**(
             nd_abs(beta)/2)*evaluate_nd_hermite_function(H_beta_is,
-            ((s_j-self.t_0)/(math.sqrt(delta_j
-            ))),hermite_coeff) for delta_j,s_j,hermite_coeff in list(zip(
-            self.delta_j_set,self.s_set,self.hermite_coeffs))]
+            powers,hermite_coeff) \
+             for (delta_j,powers,hermite_coeff) in \
+             zip(self.delta_j_set,self.powers,self.hermite_coeffs)]
         output = (1./(nd_factorial(beta)))*np.sum(summands)
         return output
     def evaluate(self,t):
         running_sum = 0
+        sq_delta = math.sqrt(self.delta)
         for beta in self.indexer:
             # last = time.time()
             indices = tuple([el-1 for el in beta])
-            running_sum += self.C_betas[indices]*nd_exp(((t-self.t_0)/(math.sqrt(
-                self.delta))),beta)
+            running_sum += self.C_betas[indices]*nd_exp(((t-self.t_0)/(sq_delta)),beta)
             # print(time.time()-last)
         return running_sum
 
@@ -193,7 +204,6 @@ class TargetValueCollector(object):
         #We create a subdivision of the box [0,1]^3 into boxes of length R
         #Obtain a list of box locations for every target
         bounds = np.array([[0,1] for i in range(d)])
-        print(bounds)
         target_boxes = [assign_box(target,bounds,box_width) for target in self.t]
         #And for every source
         source_boxes = [assign_box(source,bounds,box_width) for source in group_1_sources]
@@ -225,12 +235,19 @@ class TargetValueCollector(object):
         delta = min(delta_j_set) #in the category
         taylorExpansion = TaylorExpansion(t_0,delta,self.p,delta_j_set,s_set,self.d)
         group_3_sources = self.s[self.group_3_indices,:]
+        last1 = time.time()
         for target_index in range(len(self.t)):
             self.Sf[target_index]+=taylorExpansion.evaluate(self.t[target_index])
+        print('time evaluating taylor series: '+str(time.time()-last1))
         print('Time updating group 3:'+str(time.time()-last))
 
 targetCollector = TargetValueCollector(M,N,t,s,f,epsilon,delta,a,b,d,p)
 targetCollector.update_group_1()
 targetCollector.update_group_3()
-print(counter)
 # targetCollector.update_group_2()
+
+last = time.time()
+for (source,f_j,delta_j) in zip(s,f,delta):
+    for target in t:
+        Sf = compute_Gaussian(f_j,target,source,delta_j)
+print('naive cross time',time.time()-last,counter)
