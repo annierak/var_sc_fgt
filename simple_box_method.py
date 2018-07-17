@@ -6,7 +6,7 @@ import itertools
 from scipy.special import hermite
 import time
 import operator
-
+from collections import defaultdict
 
 #Inputs
 
@@ -47,16 +47,9 @@ class TwoDGrid(object):
         self.grid_max = n_boxes
         self.R = R
 
-    def assign_box(self,location):
-        #grid coordinates of the box the provided location is in
-        grid_coords = np.zeros(2)
-        for dim in range(2):
-            if (self.bounds[dim,0]<=location[dim]<=self.bounds[dim,1]):
-                grid_coords[dim] = int(np.floor((location[dim]-self.bounds[dim,0])/self.R))
-            else:
-                print('Box assignment error: provided location not in big box')
-                sys.exit()
-        return tuple(grid_coords)
+    def assign_box(self,location): #1D--combine to 2D
+        return (np.floor((location-self.bounds[:,0])/self.R)).astype(int)
+
 
     def obtain_box_neighbors(self,x,y): #2d grid neighbors of a given grid coord
         if ((self.grid_min <= x <= self.grid_max-1) and (
@@ -93,44 +86,53 @@ print('R is '+str(R))
 grid = TwoDGrid(box_min,box_max,R)
 
 print('The grid is '+str(grid.grid_max)+' by '+str(grid.grid_max))
-#dictionary keys
-keys = list(itertools.product(range(grid.grid_max),range(grid.grid_max)))
-values = [[] for i in keys]
 
-source_grid_dict = dict(zip(keys,values))
+
+last = time.time()
+neighbors_dct = defaultdict(list)
+for (i,j) in list(itertools.product(range(grid.grid_max),range(grid.grid_max))):
+    #Find all the boxes 1 box away from the target's box: these sources considered
+    neighbors_dct[(i,j)] = grid.obtain_box_neighbors(i,j)
 
 #starting here this stuff all happens each time step
-last = time.time()
-#loop through each source
-for source,source_r_sq in zip(s,r_sq):
+start_time = time.time()
+
+source_boxes = grid.assign_box(s)
+
+source_grid_dict = defaultdict(list)
+
+for source_box,source,source_r_sq in zip(source_boxes,  s,r_sq):
     #find what box it's in
-    source_box = grid.assign_box(source)
     #The value is a list: [source_x,source_y,r_sq]
-    source_grid_dict[source_box].append([source[0],source[1],source_r_sq])
+    source_grid_dict[tuple(source_box)].append([source[0],source[1],source_r_sq])
+
 
 #do the same for all the targets -- also collect the target index
-target_grid_dict = dict(zip(keys,values))
-for target_loc,target_index in list(zip(t,range(M))):
-    #find what box it's in
-    target_box = grid.assign_box(target_loc)
-    #The value is just the position
-    target_grid_dict[target_box].append([target_loc[0],target_loc[1],target_index])
+target_boxes = grid.assign_box(t)
 
+target_grid_dict = defaultdict(list)
+
+for target_box,target_loc,target_index in list(zip(target_boxes,t,range(M))):
+    #find what box it's in
+    #The value is just the position
+    target_grid_dict[tuple(target_box)].append([target_loc[0],target_loc[1],target_index])
+# print(time.time()-last)
 # ( ?) loop through the dict again and turn each value to a numpy array?
 
+
+
+na = np.newaxis
 #Loop through the grid boxes
 for (i,j) in list(itertools.product(range(grid.grid_max),range(grid.grid_max))):
 #Find all the boxes 1 box away from the target's box: these sources considered
-    t= time.time()
-    neighbors = grid.obtain_box_neighbors(i,j)
-    print(time.time()-t)
+    # t= time.time()
+    # print(time.time()-t)
     relevant_targets = target_grid_dict[(i,j)]
     if len(relevant_targets)>0: #only proceed if there are targets in the box
         target_x,target_y,target_indices = np.array(relevant_targets).T
-        na = np.newaxis
         target_x,target_y = target_x[:,na],target_y[:,na]
         relevant_sources = tuple(
-            source_grid_dict[neighbor] for neighbor in neighbors
+            source_grid_dict[neighbor] for neighbor in neighbors_dct[(i,j)]
             if len(source_grid_dict[neighbor])>0)
         source_x,source_y,r_sq = np.concatenate(relevant_sources,0).T
         source_x,source_y,r_sq = source_x[na,:],source_y[na,:],r_sq[na,:]
@@ -140,5 +142,5 @@ for (i,j) in list(itertools.product(range(grid.grid_max),range(grid.grid_max))):
         target_values[target_indices.astype(int)] = output_array
     else:
         pass
-    print(time.time()-t)
-print(time.time()-last)
+    # print(time.time()-t)
+print(time.time()-start_time)
